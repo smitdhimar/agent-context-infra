@@ -1,0 +1,65 @@
+# Copy this file to terraform.tfvars (git-ignored) and adjust values.
+# Apply with: terraform apply (run from environments/dev)
+
+globalConfigs = {
+  region           = "us-east-1"
+  environment      = "dev"
+  appName          = "agent-context"
+  policiesLocation = "policies/"
+}
+
+# S3 buckets (created dynamically via for_each)
+s3Buckets = {
+  "agent-context-web-assets" = {
+    versioning_enabled = true
+    public_read        = true
+    tags = {
+      Purpose = "Static assets for the admin web panel"
+    }
+  },
+  "agent-context-context-data" = {
+    versioning_enabled = true
+    tags = {
+      Purpose = "Stores agent context data files"
+    }
+  },
+  "agent-context-policies" = {
+    public_read = true
+    tags = {
+      Purpose = "Shared policy documents"
+    }
+  }
+}
+
+# API Gateway (routes created dynamically via for_each)
+apiConfig = {
+  name = "api"
+  routes = [
+    {
+      path        = "health"
+      http_method = "GET"
+      lambda      = "admin_api"
+    },
+    {
+      path        = "context"
+      http_method = "GET"
+      lambda      = "admin_api"
+    },
+    {
+      path             = "context"
+      http_method      = "POST"
+      lambda           = "process_context"
+      api_key_required = true
+    },
+    {
+      path        = "context/{id}"
+      http_method = "GET"
+      lambda      = "admin_api"
+    }
+  ]
+}
+
+# CloudWatch
+cloudwatchCommonConfigs = {
+  retention_in_days = 14
+}
