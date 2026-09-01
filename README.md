@@ -13,12 +13,21 @@ a bucket, lambda, or API route is a config-only change.
 .
 ├── Makefile
 ├── environments/
-│   ├── dev/                     # active environment
+│   ├── dev/                     # local state (no remote backend)
+│   │   ├── main.tf              # provider + module wiring
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   └── terraform.tfvars.example
+│   ├── staging/                 # remote backend -> s3://agent-context-tfstate-staging
 │   │   ├── main.tf              # provider + backend + module wiring
 │   │   ├── variables.tf
 │   │   ├── outputs.tf
 │   │   └── terraform.tfvars.example
-│   └── prod/                    # placeholder, mirrors dev when promoted
+│   └── prod/                    # remote backend -> s3://agent-context-tfstate-prod
+│       ├── main.tf              # provider + backend + module wiring
+│       ├── variables.tf
+│       ├── outputs.tf
+│       └── terraform.tfvars.example
 └── modules/
     ├── apiGateway/              # REST API, routes/methods/integrations (dynamic)
     │   ├── main.tf
@@ -63,8 +72,10 @@ Naming convention follows the reference repo: `<name>-<environment>-<appName>`
 ## Getting started
 
 ```bash
-# 1. (one-time) create the state bucket, or point the backend at an existing one
-aws s3api create-bucket --bucket agent-context-tfstate --region us-east-1
+# 1. (one-time) create the remote state buckets used by staging & prod
+aws s3api create-bucket --bucket agent-context-tfstate-staging --region us-east-1
+aws s3api create-bucket --bucket agent-context-tfstate-prod --region us-east-1
+# (dev keeps its state locally, so it needs no bucket)
 
 # 2. configure the environment
 cp environments/dev/terraform.tfvars.example environments/dev/terraform.tfvars
@@ -75,6 +86,16 @@ make agent-context-dev-init
 make agent-context-dev-plan
 make agent-context-dev-apply
 ```
+
+## Environment state strategy
+
+| Environment | Backend       | State bucket                          | State key                  |
+| ----------- | ------------- | ------------------------------------- | -------------------------- |
+| dev         | local         | —                                     | local `terraform.tfstate`  |
+| staging     | remote (S3)   | `agent-context-tfstate-staging`       | `env/staging/terraform.tfstate` |
+| prod        | remote (S3)   | `agent-context-tfstate-prod`          | `env/prod/terraform.tfstate`    |
+
+Each remote environment uses its own dedicated bucket so states never collide.
 
 ## Adding resources
 
@@ -89,5 +110,6 @@ make agent-context-dev-apply
 
 - `*.tfvars` files are git-ignored; commit only `terraform.tfvars.example`.
 - Generated lambda `.zip` archives are git-ignored and rebuilt by Terraform.
-- Backend state bucket is hardcoded in `environments/dev/main.tf` (mirrors the
-  reference repo); override with `terraform init -backend-config` if needed.
+- Remote backend buckets are hardcoded in `environments/staging/main.tf` and
+  `environments/prod/main.tf`; override with `terraform init -backend-config` if needed.
+- The `Makefile` targets are generic: `make agent-context-<env>-init|plan|apply|destroy`.

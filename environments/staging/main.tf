@@ -3,11 +3,11 @@ provider "aws" {
   region = var.globalConfigs.region
 }
 
-# remote backend configuration (prod) ============================================================
+# remote backend configuration (staging) ========================================================
 terraform {
   backend "s3" {
-    bucket       = "agent-context-tfstate-prod"
-    key          = "env/prod/terraform.tfstate"
+    bucket       = "agent-context-tfstate-staging"
+    key          = "env/staging/terraform.tfstate"
     region       = "us-east-1"
     use_lockfile = true
   }
