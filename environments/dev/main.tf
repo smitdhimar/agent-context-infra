@@ -3,15 +3,8 @@ provider "aws" {
   region = var.globalConfigs.region
 }
 
-# remote backend configuration ==================================================================
+# local backend configuration (dev uses local state, no remote backend) =========================
 terraform {
-  backend "s3" {
-    bucket       = "agent-context-tfstate"
-    key          = "env/dev/terraform.tfstate"
-    region       = "us-east-1"
-    use_lockfile = true
-  }
-
   required_providers {
     aws = {
       source  = "hashicorp/aws"
