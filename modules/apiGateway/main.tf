@@ -10,9 +10,13 @@ locals {
     ]
   ]))
 
+  path_depth = {
+    for p in local.all_path_fragments : p => length(split("/", p))
+  }
+
   parent_path = {
     for p in local.all_path_fragments : p => (
-      length(split("/", p)) == 1 ? null : join("/", slice(split("/", p), 0, length(split("/", p)) - 1))
+      local.path_depth[p] == 1 ? null : join("/", slice(split("/", p), 0, local.path_depth[p] - 1))
     )
   }
 }
@@ -32,13 +36,44 @@ resource "aws_api_gateway_rest_api" "main" {
   }
 }
 
-# Resources created dynamically for every path fragment ==========================================
-resource "aws_api_gateway_resource" "paths" {
-  for_each = toset(local.all_path_fragments)
+# Resources are split by path depth into separate resource blocks so a nested path can reference
+# its parent WITHOUT referencing another instance of the same resource block (Terraform treats a
+# for_each resource as one node, so an internal reference shows up as a self-cycle).
+#
+# Level-1: parent is the API root.
+resource "aws_api_gateway_resource" "level1" {
+  for_each = { for p in local.all_path_fragments : p => p if local.path_depth[p] == 1 }
 
   rest_api_id = aws_api_gateway_rest_api.main.id
-  parent_id   = local.parent_path[each.value] == null ? aws_api_gateway_rest_api.main.root_resource_id : aws_api_gateway_resource.paths[local.parent_path[each.value]].id
-  path_part   = element(split("/", each.value), length(split("/", each.value)) - 1)
+  parent_id   = aws_api_gateway_rest_api.main.root_resource_id
+  path_part   = element(split("/", each.value), local.path_depth[each.value] - 1)
+}
+
+# Level-2: parent is the matching level-1 resource.
+resource "aws_api_gateway_resource" "level2" {
+  for_each = { for p in local.all_path_fragments : p => p if local.path_depth[p] == 2 }
+
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.level1[local.parent_path[each.value]].id
+  path_part   = element(split("/", each.value), local.path_depth[each.value] - 1)
+}
+
+# Level-3: parent is the matching level-2 resource. (Add another block for deeper nesting.)
+resource "aws_api_gateway_resource" "level3" {
+  for_each = { for p in local.all_path_fragments : p => p if local.path_depth[p] == 3 }
+
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.level2[local.parent_path[each.value]].id
+  path_part   = element(split("/", each.value), local.path_depth[each.value] - 1)
+}
+
+# Unified lookup: path fragment -> resource id (used by methods & integrations below) ============
+locals {
+  resource_ids = merge(
+    { for k, r in aws_api_gateway_resource.level1 : k => r.id },
+    { for k, r in aws_api_gateway_resource.level2 : k => r.id },
+    { for k, r in aws_api_gateway_resource.level3 : k => r.id },
+  )
 }
 
 # Methods created dynamically per route ==========================================================
@@ -46,7 +81,7 @@ resource "aws_api_gateway_method" "routes" {
   for_each = { for r in local.api_routes : "${r.http_method}-${r.path}" => r }
 
   rest_api_id      = aws_api_gateway_rest_api.main.id
-  resource_id      = aws_api_gateway_resource.paths[each.value.path].id
+  resource_id      = local.resource_ids[each.value.path]
   http_method      = each.value.http_method
   authorization    = "NONE"
   api_key_required = try(each.value.api_key_required, false)
@@ -57,11 +92,11 @@ resource "aws_api_gateway_integration" "routes" {
   for_each = { for r in local.api_routes : "${r.http_method}-${r.path}" => r }
 
   rest_api_id             = aws_api_gateway_rest_api.main.id
-  resource_id             = aws_api_gateway_resource.paths[each.value.path].id
+  resource_id             = local.resource_ids[each.value.path]
   http_method             = each.value.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = var.lambda_arns[each.value.lambda]
+  uri = "arn:aws:apigateway:${var.globalConfigs.region}:lambda:path/2015-03-31/functions/${var.lambda_arns[each.value.lambda]}/invocations"
 }
 
 # Allow API Gateway to invoke each backing lambda ================================================

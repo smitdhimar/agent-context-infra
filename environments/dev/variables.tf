@@ -4,7 +4,6 @@ variable "globalConfigs" {
     region           = string
     environment      = string
     appName          = string
-    policiesLocation = string
   })
 }
 
